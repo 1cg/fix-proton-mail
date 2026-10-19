@@ -1,11 +1,12 @@
-// fix-proton-mail v6: Proton Mail keyboard enhancements (Chrome MV3 extension, main-world content script)
+// fix-proton-mail v7: Proton Mail keyboard enhancements (Chrome MV3 extension, main-world content script)
 //
 // Replaces Proton's single-key shortcuts. Every unmodified letter (and *) is
 // consumed outside text fields, so Proton's own shortcuts never act on its
 // own selection, which can differ from this cursor. Modified keys (cmd/ctrl/alt)
 // still go to Proton. While a dropdown or dialog is open, Proton gets every key.
-// Text fields get every key (Esc blurs them). The composer body is an iframe
-// this script never hooks.
+// Text fields get every key (Esc blurs them). While a composer is open and not
+// minimized, Proton gets every key. The composer body is an iframe this
+// script never hooks.
 //
 // List (focus in the list, or nowhere):
 //   ↓ ↑ j k               move cursor            cmd+↓ / cmd+↑   last / first row
@@ -45,7 +46,7 @@
 //   - folder routes are /u/<n>/<slug>, and the router follows history.pushState + popstate
 (() => {
   if (window.top !== window || window.__fixProtonMail) return;
-  window.__fixProtonMail = 'v6';
+  window.__fixProtonMail = 'v7';
 
   const SEL = {
     row: '[data-shortcut-target="item-container"]',
@@ -57,6 +58,7 @@
     replyAll: '[data-testid="message-view:reply-all"]',
     forward: '[data-testid="message-view:forward"]',
     search: 'input[data-testid="search-keyword"]',
+    composer: 'section.composer',   // minimized: .composer--is-minimized
     compose: '[data-testid="sidebar:compose"]',
     unreadFilter: '[data-testid="filter-dropdown:show-unread"]',
     filters: '[data-testid="filter-dropdown:show-filters"]',
@@ -72,7 +74,7 @@
   const READER_NATIVE = new Set(['C', 'E', 'o']);   // act on the open message only
 
   // ---- load indicator: console line + 3s toast --------------------------
-  console.info('[fix-proton-mail] loaded v6');
+  console.info('[fix-proton-mail] loaded v7');
   const toast = (msg, ms = 3000) => {
     const show = () => {
       const t = document.createElement('div');
@@ -86,7 +88,7 @@
     };
     document.body ? show() : addEventListener('DOMContentLoaded', show, { once: true });
   };
-  toast('fix-proton-mail v6 active (? for help)');
+  toast('fix-proton-mail v7 active (? for help)');
 
   // report a missing element; returns true so the caller still consumes the key
   const fail = (name, sel) => {
@@ -128,6 +130,8 @@
   const isOpenPopup = (p) => !!p && !p.classList.contains('is-dropdown-out') && shown(p);
   const popupOpen = (el) =>
     isOpenPopup(el?.closest?.(SEL.popup)) || [...document.querySelectorAll(SEL.popup)].some(isOpenPopup);
+  const composerOpen = () => [...document.querySelectorAll(SEL.composer)]
+    .some((c) => !c.classList.contains('composer--is-minimized') && shown(c));
   const inClosedPopup = (el) => !!el?.closest?.(SEL.popup) && !isOpenPopup(el.closest(SEL.popup));
 
   // ---- message list -----------------------------------------------------
@@ -202,11 +206,14 @@
     return true;
   };
 
+  // open the cursor row; if it is already open, move focus into the reader
   const openCursor = () => {
     const list = rows();
     const i = currentIndex(list);
     if (i < 0) return false;
-    list[i].click();
+    const art = list[i] === openRow(list) && currentArticle();
+    if (art) art.focus();
+    else list[i].click();
     return true;
   };
 
@@ -450,7 +457,7 @@
     if (l.length) focusRow(l[0]);
   };
 
-  const HELP = `fix-proton-mail v6
+  const HELP = `fix-proton-mail v7
 list:    ↑↓ j k  move   ⌘↑↓  first/last   shift+↑↓ J K  select range
          x space  toggle   Enter →  open   ←  folders   Esc  clear / leave search
          Del/⌫  archive
@@ -644,7 +651,9 @@ any:     n  new   /  search   U A  unread/all   v  filter   f  hints   ?  help`;
 
   const onKey = (e, ae, reader) => {
     if (hint) return handleHintKey(e);
-    if (e.isComposing || popupOpen(ae)) return;
+    // while a composer is open, Proton gets every key: focus can be on a
+    // composer button or chip, not in a text field
+    if (e.isComposing || popupOpen(ae) || composerOpen()) return;
 
     if (isEditable(ae)) {
       if (e.key !== 'Escape' || e.ctrlKey || e.metaKey || e.altKey) return;

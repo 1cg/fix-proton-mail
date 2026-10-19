@@ -36,6 +36,7 @@ All keys are inactive in text fields and in the composer. The extension must not
 - Keys with Cmd, Ctrl or Alt go to Proton. Exception: Cmd+Up and Cmd+Down in the list.
 - `C`, `E` and `o` in the reader go to Proton (`READER_NATIVE`). They act only on the open message.
 - The script ignores keys in text fields, during IME composition, and while a dropdown or dialog is open. Esc in a text field blurs it.
+- While a composer is open and not minimized (`section.composer` without `.composer--is-minimized`), Proton gets every key. Focus can be on a composer button or an address chip, which is not a text field. Before this rule, letters and Backspace (archive) acted there.
 - A closing dropdown has `.is-dropdown-out` and can keep focus in a hidden input. The script does not count it as open.
 - The message body is a same-origin iframe. Keys in it do not reach the top window. On window `blur`, the script adds a listener to the iframe document once.
 
