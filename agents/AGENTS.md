@@ -2,12 +2,18 @@
 
 This file records the design decisions for this extension, and how to develop and test it in a live browser.
 
+## Goal
+
+Keyboard-driven triage for the Proton Mail web app (`mail.proton.me`), as a Chrome MV3 extension. Develop it by testing live in a browser on the user's Proton account.
+
+All keys are inactive in text fields and in the composer. The extension must not break typing in the composer or in search.
+
 ## Files
 
 | File | Purpose |
 |---|---|
 | `../extension/fix-proton-mail.js` | All logic. The header comment lists the keys and the DOM assumptions. |
-| `../extension/manifest.json` | MV3 manifest. One content script, main world, `document_start`. |
+| `../extension/manifest.json` | MV3 manifest. Two content scripts at `document_start`: the main script in the main world, and `settings.js` in the isolated world. |
 | `../extension/settings.js` | Isolated-world bridge: reads the options and marks `<html>`. |
 | `../extension/options.html`, `options.js` | The options page. |
 | `cdp.mjs` | Drives a browser through the Chrome DevTools Protocol (CDP). |
@@ -69,11 +75,43 @@ The mode comes from where focus is.
 - When a conversation opens and its top message is expanded, Proton still animates the pane down to that message, which hides the subject. The animation writes `scrollTop` each frame, so the script drops those writes on that scroller for 1.5 s. Wheel and `j`/`k` still scroll, because they do not write `scrollTop`. A click ends the hold.
 - Only the visual order changes. The DOM order, Tab order and Proton's choice of which message to expand do not change.
 
+### Proton DOM
+
+Captured from the user's inbox in October 2026, column layout. The current selectors are in `SEL`.
+
+```
+section[aria-label="Message list"]
+  div[data-testid="message-list-loaded"]
+    div.item-container[data-shortcut-target="item-container"]     <- the row
+        [tabindex="0"] [data-element-id="<id>"]
+        [data-shortcut-target-selected]                          <- Proton's own selection flag
+        class includes "outline-none--at-all"                    <- kills focus outlines
+      label.checkbox-container
+        input[type=checkbox][data-testid="item-checkbox"]
+      div.item-hover-action-buttons.hidden                       <- per-row hover actions; text only in span.sr-only
+```
+
+- The top toolbar buttons are `[data-testid="toolbar:<name>"]`. They show only when a row is checked or a conversation is open.
+- Proton has its own shortcut system (`data-shortcut-target`). This extension replaces its single-letter keys. See "Key handling".
+
 ### Errors, not fallbacks
 
 - Each selector is in `SEL`. There are no fallback selectors.
 - If a selector finds nothing, the key is still consumed and a toast names the selector. The fix is to update `SEL`.
 - Fallback selectors hide breakage and can click the wrong element. A clear error is safer.
+
+## Workflow
+
+1. **Recon, read-only.** Inspect the DOM for the feature. Read console messages for errors.
+2. **Prototype in the page.** Inject small snippets, one feature at a time. After each one, check the DOM state and take a screenshot. For example, the toolbar shows the selection count, or the row leaves the list.
+3. **Consolidate** into `extension/fix-proton-mail.js`. Keep one IIFE, the idempotent guard, and lazy lookups.
+4. **Full test.** Reload the tab, load the final file, and run every affected key again.
+5. **Hand off.** Tell the user:
+   - what changed
+   - which selectors are fragile, because they will break if Proton changes its page
+   - how to make sure that it loaded (the toast and the console line)
+
+The agent cannot open `chrome://` pages. The user loads, reloads and configures the extension in `chrome://extensions`.
 
 ## Development with Chrome
 
@@ -94,9 +132,9 @@ Use Chrome Canary. It has a separate profile, so a test does not touch your norm
 
 3. Log in to Proton by hand. An agent must not type the password.
 4. Make sure that the debug port answers: `curl -s http://127.0.0.1:9333/json`.
-5. Make sure that the script loaded: `node llms/cdp.mjs eval 'window.__fixProtonMail'`.
+5. Make sure that the script loaded: `node agents/cdp.mjs eval 'window.__fixProtonMail'`.
 
-Chrome Canary 2026-10 ignored `--load-extension`, also with the `--disable-features` flag. If the script did not load, inject it: `node llms/cdp.mjs evalfile extension/fix-proton-mail.js`. The script does not depend on load timing, so the result is the same.
+Chrome Canary 2026-10 ignored `--load-extension`, also with the `--disable-features` flag. If the script did not load, inject it: `node agents/cdp.mjs evalfile extension/fix-proton-mail.js`. The script does not depend on load timing, so the result is the same.
 
 After you change the script, reload the tab and load the script again. When you finish, quit Canary and delete the profile folder. A running debug instance can stop your normal browser from starting.
 
@@ -116,11 +154,11 @@ After you change the script, reload the tab and load the script again. When you 
 Examples:
 
 ```
-node llms/cdp.mjs front
-node llms/cdp.mjs evalfile llms/guard.js     # must print "list" before list keys
-node llms/cdp.mjs key ArrowDown
-node llms/cdp.mjs key ArrowDown shift
-node llms/cdp.mjs shot /tmp/after.png
+node agents/cdp.mjs front
+node agents/cdp.mjs evalfile agents/guard.js     # must print "list" before list keys
+node agents/cdp.mjs key ArrowDown
+node agents/cdp.mjs key ArrowDown shift
+node agents/cdp.mjs shot /tmp/after.png
 ```
 
 Lessons:
@@ -132,7 +170,8 @@ Lessons:
 
 ## Safety rules for live tests
 
-- The account holds real mail. Archive is reversible, but before the first archive test, name the messages and get a yes from the user.
+- The account holds real mail. Archive is reversible (move back to Inbox, or Proton's undo toast), but before the first archive test, name the messages and get a yes from the user.
+- Test on low-value messages that the user names, or in a test folder or label.
 - Never trigger Trash, permanent delete, select all, or empty folder.
 - Do not send, reply to, or forward mail. Stub the button clicks to test these keys.
 - Do not change Proton settings without asking.
