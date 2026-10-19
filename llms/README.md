@@ -6,8 +6,10 @@ This file records the design decisions for this extension, and how to develop an
 
 | File | Purpose |
 |---|---|
-| `../extension/proton-kbd.js` | All logic. The header comment lists the keys and the DOM assumptions. |
+| `../extension/fix-proton-mail.js` | All logic. The header comment lists the keys and the DOM assumptions. |
 | `../extension/manifest.json` | MV3 manifest. One content script, main world, `document_start`. |
+| `../extension/settings.js` | Isolated-world bridge: reads the options and marks `<html>`. |
+| `../extension/options.html`, `options.js` | The options page. |
 | `cdp.mjs` | Drives a browser through the Chrome DevTools Protocol (CDP). |
 | `guard.js` | Prints where focus is. Run it before each test key. |
 
@@ -15,12 +17,11 @@ This file records the design decisions for this extension, and how to develop an
 
 ### Packaging
 
-- The code is a Chrome MV3 extension, not a Brave scriptlet. An extension works in Chrome, Brave, and other Chromium browsers.
+- The code is a Chrome MV3 extension. It works in Chrome, Brave, and other Chromium browsers. It started as a Brave custom scriptlet; that form is not supported.
 - The content script runs in the page's main world (`"world": "MAIN"`, Chromium 111 or later). This gives direct access to the page DOM and to the router.
 - The script runs at `document_start`. It makes no one-time queries at load. All lookups are lazy.
-- The same file also runs as a Brave custom scriptlet. Do not use both at the same time.
-- An idempotent guard (`window.__protonKbd`) stops a second copy.
-- Each release changes the version in three places: `window.__protonKbd`, the console line and toast, and `manifest.json`. The toast tells the user which version is active.
+- An idempotent guard (`window.__fixProtonMail`) stops a second copy.
+- Each release changes the version in three places: `window.__fixProtonMail`, the console line and toast, and `manifest.json`. The toast tells the user which version is active.
 
 ### Key handling
 
@@ -60,6 +61,14 @@ The mode comes from where focus is.
 - If a folder link is not in the DOM, the script calls `history.pushState` and dispatches a `PopStateEvent`. Proton's router follows that.
 - A search is the folder path plus `#keyword=...`. Proton's clear button only empties the text, so Esc routes back to the last folder.
 
+### Message order
+
+- An open conversation shows the newest message first. A CSS rule sets `flex-direction: column-reverse` on the div that holds the `article` elements.
+- The options page (`options.html`) has one checkbox for this. It saves `newestFirst` in `chrome.storage.sync`.
+- `fix-proton-mail.js` runs in the main world and cannot read `chrome.storage`. `settings.js` runs in the isolated world, reads the option, and sets `data-fix-proton-mail-oldest-first` on `<html>`. The CSS rule does not apply when that attribute is present.
+- When a conversation opens and its top message is expanded, Proton still animates the pane down to that message, which hides the subject. The animation writes `scrollTop` each frame, so the script drops those writes on that scroller for 1.5 s. Wheel and `j`/`k` still scroll, because they do not write `scrollTop`. A click ends the hold.
+- Only the visual order changes. The DOM order, Tab order and Proton's choice of which message to expand do not change.
+
 ### Errors, not fallbacks
 
 - Each selector is in `SEL`. There are no fallback selectors.
@@ -76,7 +85,7 @@ Use Chrome Canary. It has a separate profile, so a test does not touch your norm
    ```
    "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary" \
      --remote-debugging-port=9333 \
-     --user-data-dir=/tmp/proton-kbd-profile \
+     --user-data-dir=/tmp/fix-proton-mail-profile \
      --no-first-run --no-default-browser-check \
      --disable-features=DisableLoadExtensionCommandLineSwitch \
      --load-extension="$PWD/extension" \
@@ -85,9 +94,9 @@ Use Chrome Canary. It has a separate profile, so a test does not touch your norm
 
 3. Log in to Proton by hand. An agent must not type the password.
 4. Make sure that the debug port answers: `curl -s http://127.0.0.1:9333/json`.
-5. Make sure that the script loaded: `node llms/cdp.mjs eval 'window.__protonKbd'`.
+5. Make sure that the script loaded: `node llms/cdp.mjs eval 'window.__fixProtonMail'`.
 
-Chrome Canary 2026-10 ignored `--load-extension`, also with the `--disable-features` flag. If the script did not load, inject it: `node llms/cdp.mjs evalfile extension/proton-kbd.js`. The script does not depend on load timing, so the result is the same.
+Chrome Canary 2026-10 ignored `--load-extension`, also with the `--disable-features` flag. If the script did not load, inject it: `node llms/cdp.mjs evalfile extension/fix-proton-mail.js`. The script does not depend on load timing, so the result is the same.
 
 After you change the script, reload the tab and load the script again. When you finish, quit Canary and delete the profile folder. A running debug instance can stop your normal browser from starting.
 

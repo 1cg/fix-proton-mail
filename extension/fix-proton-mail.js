@@ -1,4 +1,4 @@
-// Proton Mail keyboard enhancements v5 (Chrome/Brave extension, or Brave custom scriptlet)
+// fix-proton-mail v6: Proton Mail keyboard enhancements (Chrome MV3 extension, main-world content script)
 //
 // Replaces Proton's single-key shortcuts. Every unmodified letter (and *) is
 // consumed outside text fields, so Proton's own shortcuts never act on its
@@ -40,10 +40,12 @@
 //   - toolbar buttons act on checked rows, else on the open conversation
 //   - a row's data-element-id equals the conversation id at the end of the URL
 //   - the message body is a same-origin iframe
+//   - a conversation's articles share one parent div (CSS shows them newest first)
+//   - an article has data-expanded="true" when it is open
 //   - folder routes are /u/<n>/<slug>, and the router follows history.pushState + popstate
 (() => {
-  if (window.top !== window || window.__protonKbd) return;
-  window.__protonKbd = 'v5';
+  if (window.top !== window || window.__fixProtonMail) return;
+  window.__fixProtonMail = 'v6';
 
   const SEL = {
     row: '[data-shortcut-target="item-container"]',
@@ -70,7 +72,7 @@
   const READER_NATIVE = new Set(['C', 'E', 'o']);   // act on the open message only
 
   // ---- load indicator: console line + 3s toast --------------------------
-  console.info('[proton-kbd] loaded v5');
+  console.info('[fix-proton-mail] loaded v6');
   const toast = (msg, ms = 3000) => {
     const show = () => {
       const t = document.createElement('div');
@@ -84,12 +86,12 @@
     };
     document.body ? show() : addEventListener('DOMContentLoaded', show, { once: true });
   };
-  toast('proton-kbd v5 active (? for help)');
+  toast('fix-proton-mail v6 active (? for help)');
 
   // report a missing element; returns true so the caller still consumes the key
   const fail = (name, sel) => {
-    console.warn(`[proton-kbd] ${name} not found: ${sel}`);
-    toast(`proton-kbd: ${name} not found\n${sel}\nNot available here, or Proton changed its page (update SEL).`, 6000);
+    console.warn(`[fix-proton-mail] ${name} not found: ${sel}`);
+    toast(`fix-proton-mail: ${name} not found\n${sel}\nNot available here, or Proton changed its page (update SEL).`, 6000);
     return true;
   };
   // click one element, or report it missing
@@ -102,9 +104,12 @@
 
   // ---- focus ring -------------------------------------------------------
   const ring = document.createElement('style');
-  // rows carry .outline-none--at-all, so out-specify it for the cursor row
+  // rows carry .outline-none--at-all, so out-specify it for the cursor row.
+  // Show a conversation newest first: reverse its message container. The
+  // options page turns this off through an attribute that settings.js sets.
   ring.textContent = `
-    html ${SEL.row}:focus, html ${SEL.navAny}:focus{outline:2px solid #6d4aff!important;outline-offset:-2px!important}`;
+    html ${SEL.row}:focus, html ${SEL.navAny}:focus{outline:2px solid #6d4aff!important;outline-offset:-2px!important}
+    html:not([data-fix-proton-mail-oldest-first]) div:has(> ${SEL.article}){display:flex;flex-direction:column-reverse}`;
   document.documentElement.appendChild(ring);
 
   // ---- generic helpers --------------------------------------------------
@@ -247,7 +252,7 @@
   // moves: the rows leave the list, so put the cursor where the first one was
   const toolbarAction = async (names, fromReader, { moves = false, keepChecked = false } = {}) => {
     const t = targets(fromReader);
-    if (!t) return toast('proton-kbd: no row to act on');
+    if (!t) return toast('fix-proton-mail: no row to act on');
     if (t.auto) setChecked(t.rows[0], true);
     let b = null;
     await waitFor(() => (b = toolbarButton(names)), 1000);   // toolbar re-renders after a check
@@ -267,7 +272,7 @@
 
   const star = (fromReader) => {
     const t = targets(fromReader);
-    if (!t) return toast('proton-kbd: no row to act on');
+    if (!t) return toast('fix-proton-mail: no row to act on');
     for (const r of t.rows) {
       const b = r.querySelector(SEL.star);
       if (!b) return fail('star', SEL.star);
@@ -297,9 +302,9 @@
   const listMessage = async (name) => {
     const list = rows();
     const checked = list.filter(isChecked);
-    if (checked.length > 1) return toast('proton-kbd: select one message');
+    if (checked.length > 1) return toast('fix-proton-mail: select one message');
     const r = checked[0] || list[currentIndex(list)] || openRow(list);
-    if (!r) return toast('proton-kbd: select or open a message first');
+    if (!r) return toast('fix-proton-mail: select or open a message first');
     const id = r.dataset.elementId;
     if (openId() !== id) {
       r.click();
@@ -309,14 +314,57 @@
     messageButton(name);
   };
 
-  // Proton swallows arrows in the message view, so scroll the pane ourselves
-  const scrollReader = (dir) => {
-    let el = currentArticle();
+  // the nearest ancestor that scrolls
+  const scroller = (el) => {
     while (el && !(el.scrollHeight > el.clientHeight && /auto|scroll/.test(getComputedStyle(el).overflowY)))
       el = el.parentElement;
-    el?.scrollBy({ top: dir * 80 });   // no scroller = short message, nothing to do
+    return el;
+  };
+
+  // Proton swallows arrows in the message view, so scroll the pane ourselves
+  const scrollReader = (dir) => {
+    scroller(currentArticle())?.scrollBy({ top: dir * 80 });   // no scroller = short message
     return true;
   };
+
+  // When a conversation opens with its top message expanded, Proton still
+  // animates the pane down to that message, which hides the subject. The
+  // animation writes scrollTop each frame, so drop those writes for 1.5 s.
+  // Wheel and j/k still scroll, because they do not write scrollTop. A click
+  // ends the hold, so Proton can scroll to a message the user expands.
+  let clickAt = 0;
+  addEventListener('pointerdown', () => { clickAt = Date.now(); }, true);
+  const realScrollTop = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
+  const keepTop = async (path) => {
+    const start = Date.now();
+    const active = () => Date.now() - start < 1500 && location.pathname === path && clickAt < start;
+    let sc = null;
+    while (active() && !sc) {
+      const arts = [...document.querySelectorAll(SEL.article)];
+      const open = arts.find((a) => a.dataset.expanded === 'true');
+      if (arts.length > 1 && open) {
+        const top = arts.reduce((a, b) => (b.getBoundingClientRect().top < a.getBoundingClientRect().top ? b : a));
+        if (top !== open) return;   // Proton expanded a lower message: keep its scroll
+        sc = scroller(top);
+      }
+      if (!sc) await sleep(20);
+    }
+    if (!sc) return;
+    Object.defineProperty(sc, 'scrollTop', {
+      configurable: true,
+      get() { return realScrollTop.get.call(this); },
+      set(v) { if (!active()) realScrollTop.set.call(this, v); },
+    });
+    realScrollTop.set.call(sc, 0);
+    while (active()) await sleep(50);
+    delete sc.scrollTop;
+  };
+  let lastPath = location.pathname;
+  setInterval(() => {
+    if (location.pathname === lastPath) return;
+    lastPath = location.pathname;
+    keepTop(lastPath);
+  }, 50);
 
   // ---- global -----------------------------------------------------------
   const focusSearch = () => {
@@ -402,7 +450,7 @@
     if (l.length) focusRow(l[0]);
   };
 
-  const HELP = `proton-kbd v5
+  const HELP = `fix-proton-mail v6
 list:    ↑↓ j k  move   ⌘↑↓  first/last   shift+↑↓ J K  select range
          x space  toggle   Enter →  open   ←  folders   Esc  clear / leave search
          Del/⌫  archive
@@ -630,8 +678,8 @@ any:     n  new   /  search   U A  unread/all   v  filter   f  hints   ?  help`;
     if (!f?.matches?.(SEL.bodyFrame)) return;
     let doc;
     try { doc = f.contentDocument; } catch { return; }
-    if (!doc || doc.__protonKbd) return;
-    doc.__protonKbd = true;
+    if (!doc || doc.__fixProtonMail) return;
+    doc.__fixProtonMail = true;
     doc.addEventListener('keydown', (e) => onKey(e, doc.activeElement, true), true);
   };
   window.addEventListener('blur', () => setTimeout(hookBodyFrame, 0));
