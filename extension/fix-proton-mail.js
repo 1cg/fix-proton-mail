@@ -1,4 +1,4 @@
-// fix-proton-mail v8: Proton Mail keyboard enhancements (Chrome MV3 extension, main-world content script)
+// fix-proton-mail v8.1: Proton Mail keyboard enhancements (Chrome MV3 extension, main-world content script)
 //
 // Replaces Proton's single-key shortcuts. Every unmodified letter (and *) is
 // consumed outside text fields, so Proton's own shortcuts never act on its
@@ -51,7 +51,7 @@
 //   - folder routes are /u/<n>/<slug>, and the router follows history.pushState + popstate
 (() => {
   if (window.top !== window || window.__fixProtonMail) return;
-  window.__fixProtonMail = 'v8';
+  window.__fixProtonMail = 'v8.1';
 
   const SEL = {
     row: '[data-shortcut-target="item-container"]',
@@ -81,7 +81,7 @@
   const READER_NATIVE = new Set(['C', 'E', 'o']);   // act on the open message only
 
   // ---- load indicator: console line + 3s toast --------------------------
-  console.info('[fix-proton-mail] loaded v8');
+  console.info('[fix-proton-mail] loaded v8.1');
   const toast = (msg, ms = 3000) => {
     const show = () => {
       const t = document.createElement('div');
@@ -95,7 +95,7 @@
     };
     document.body ? show() : addEventListener('DOMContentLoaded', show, { once: true });
   };
-  toast('fix-proton-mail v8 active (? for help)');
+  toast('fix-proton-mail v8.1 active (? for help)');
 
   // report a missing element; returns true so the caller still consumes the key
   const fail = (name, sel) => {
@@ -117,7 +117,7 @@
   // Show a conversation newest first: reverse its message container. The
   // options page turns this off through an attribute that settings.js sets.
   ring.textContent = `
-    html ${SEL.row}:focus, html ${SEL.navAny}:focus, html ${SEL.article}:focus{outline:2px solid #6d4aff!important;outline-offset:-2px!important}
+    html ${SEL.row}:focus, html ${SEL.navAny}:focus, html ${SEL.article}:focus-within{outline:2px solid #6d4aff!important;outline-offset:-2px!important}
     html:not([data-fix-proton-mail-oldest-first]) div:has(> ${SEL.article}){display:flex;flex-direction:column-reverse}`;
   document.documentElement.appendChild(ring);
 
@@ -530,7 +530,7 @@
     if (l.length) focusRow(l[0]);
   };
 
-  const HELP = `fix-proton-mail v8
+  const HELP = `fix-proton-mail v8.1
 list:    ↑↓ j k  move   PgUp/Dn  page   ⌘↑↓  first/last   shift+↑↓ J K  select range
          x space  toggle   Enter →  open   ←  folders   Esc  clear / leave search
          Del/⌫  archive
