@@ -48,7 +48,7 @@ The mode comes from where focus is.
 - **Reader:** focus in an `article` or the body iframe. Proton swallows arrows, so the script moves itself.
   - The current message has a focus ring. The rule uses `:focus-within`, because Proton moves focus into the body iframe of an expanded message.
   - The current message is the focused `article`. Proton's `data-hasfocus` does not follow focus, so it is only a fallback.
-  - Down and Up scroll 80 px while the current message runs past the pane edge. At its edge, they focus the next or previous message in screen order, and show at least 120 px of it.
+  - Down and Up scroll 80 px while the current message runs past the pane edge. At its edge, they focus the next or previous message in screen order, and show at least 120 px of it. Past the first or last message, they scroll on to the pane edge, so Up shows the subject.
   - Page Down and Page Up scroll 90% of the pane, then focus the message at the pane top.
   - Enter and Right expand a collapsed message (click `message-header-collapsed:<n>`) or collapse an expanded one (click `.message-header-from-container`). The class selector is fragile.
   - Enter or Right on the row that is already open moves focus into the reader.

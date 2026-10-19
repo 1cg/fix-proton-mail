@@ -1,4 +1,4 @@
-// fix-proton-mail v8.1: Proton Mail keyboard enhancements (Chrome MV3 extension, main-world content script)
+// fix-proton-mail v8.2: Proton Mail keyboard enhancements (Chrome MV3 extension, main-world content script)
 //
 // Replaces Proton's single-key shortcuts. Every unmodified letter (and *) is
 // consumed outside text fields, so Proton's own shortcuts never act on its
@@ -51,7 +51,7 @@
 //   - folder routes are /u/<n>/<slug>, and the router follows history.pushState + popstate
 (() => {
   if (window.top !== window || window.__fixProtonMail) return;
-  window.__fixProtonMail = 'v8.1';
+  window.__fixProtonMail = 'v8.2';
 
   const SEL = {
     row: '[data-shortcut-target="item-container"]',
@@ -81,7 +81,7 @@
   const READER_NATIVE = new Set(['C', 'E', 'o']);   // act on the open message only
 
   // ---- load indicator: console line + 3s toast --------------------------
-  console.info('[fix-proton-mail] loaded v8.1');
+  console.info('[fix-proton-mail] loaded v8.2');
   const toast = (msg, ms = 3000) => {
     const show = () => {
       const t = document.createElement('div');
@@ -95,7 +95,7 @@
     };
     document.body ? show() : addEventListener('DOMContentLoaded', show, { once: true });
   };
-  toast('fix-proton-mail v8.1 active (? for help)');
+  toast('fix-proton-mail v8.2 active (? for help)');
 
   // report a missing element; returns true so the caller still consumes the key
   const fail = (name, sel) => {
@@ -360,7 +360,8 @@
     if (sc && past > 1) { sc.scrollBy({ top: dir * Math.min(STEP, past) }); return true; }
     const arts = articlesOnScreen();
     const next = arts[arts.indexOf(art) + dir];
-    if (!next) return true;
+    // no message beyond: scroll on to the pane edge (the subject is above the top one)
+    if (!next) { sc?.scrollBy({ top: dir * STEP }); return true; }
     next.focus({ preventScroll: true });
     const n = next.getBoundingClientRect();
     const show = Math.min(n.height, PEEK);
@@ -530,7 +531,7 @@
     if (l.length) focusRow(l[0]);
   };
 
-  const HELP = `fix-proton-mail v8.1
+  const HELP = `fix-proton-mail v8.2
 list:    ↑↓ j k  move   PgUp/Dn  page   ⌘↑↓  first/last   shift+↑↓ J K  select range
          x space  toggle   Enter →  open   ←  folders   Esc  clear / leave search
          Del/⌫  archive
