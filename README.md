@@ -10,7 +10,7 @@ This repository is a public resource. Issues and pull requests are off.
 2. Open `chrome://extensions` (Brave: `brave://extensions`).
 3. Turn on **Developer mode**.
 4. Click **Load unpacked** and select the `extension` folder.
-5. Reload Proton Mail. A "fix-proton-mail v7 active" toast shows.
+5. Reload Proton Mail. A "fix-proton-mail v8 active" toast shows.
 
 ## Keys
 
@@ -20,7 +20,9 @@ Press `?` in Proton Mail for the full list. The keys do not work in text fields 
 
 | Key | Action |
 |---|---|
-| `Up` `Down` `j` `k` | Move the cursor (list); scroll (reader) |
+| `Up` `Down` `j` `k` | Move the cursor (list); scroll the message, then go to the next or previous message (reader) |
+| `Page Up` `Page Down` | Move a page (list, with `Shift` to select); scroll a page (reader) |
+| `Enter` `Right` in the reader | Expand or collapse the message |
 | `Shift+Up` `Shift+Down` `J` `K` | Select a range (list); next or previous conversation (reader) |
 | `x` `Space` | Check the cursor row |
 | `Enter` `Right` | Open the cursor row |

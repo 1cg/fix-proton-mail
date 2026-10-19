@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "fix-proton-mail",
-  "version": "7.0",
+  "version": "8.0",
   "description": "Keyboard triage for Proton Mail: cursor, range select, archive, reply, folders.",
   "icons": {
     "16": "icons/icon16.png",

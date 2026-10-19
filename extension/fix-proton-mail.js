@@ -1,4 +1,4 @@
-// fix-proton-mail v7: Proton Mail keyboard enhancements (Chrome MV3 extension, main-world content script)
+// fix-proton-mail v8: Proton Mail keyboard enhancements (Chrome MV3 extension, main-world content script)
 //
 // Replaces Proton's single-key shortcuts. Every unmodified letter (and *) is
 // consumed outside text fields, so Proton's own shortcuts never act on its
@@ -10,6 +10,7 @@
 //
 // List (focus in the list, or nowhere):
 //   ↓ ↑ j k               move cursor            cmd+↓ / cmd+↑   last / first row
+//   PgDn PgUp             move a page (shift: select)
 //   shift+↓ ↑  J K        range-select from the anchor row
 //   x  space              toggle the cursor row's checkbox
 //   Enter  →              open cursor row        Esc   clear selection, then leave search
@@ -18,7 +19,9 @@
 //   r / a R / F           reply / reply all / forward the one selected conversation
 //                         (the one checked row, else the cursor row, else the open one)
 // Reader (focus in an open message or its body iframe):
-//   ↓ ↑ j k               scroll                 J / K   open next / previous conversation
+//   ↓ ↑ j k               scroll the message; at its edge, go to the next / previous message
+//   PgDn PgUp             scroll a page          Enter →  expand / collapse the message
+//   J / K                 open next / previous conversation
 //   r                     reply                  a  R    reply all
 //   F                     forward                Esc ←   back to the list
 //   Del / ⌫               archive the open conversation
@@ -42,17 +45,21 @@
 //   - a row's data-element-id equals the conversation id at the end of the URL
 //   - the message body is a same-origin iframe
 //   - a conversation's articles share one parent div (CSS shows them newest first)
-//   - an article has data-expanded="true" when it is open
+//   - an article has data-expanded="true" when it is open; its collapsed header
+//     expands on click, and .message-header-from-container collapses it
+//   - Proton's data-hasfocus does not follow focus
 //   - folder routes are /u/<n>/<slug>, and the router follows history.pushState + popstate
 (() => {
   if (window.top !== window || window.__fixProtonMail) return;
-  window.__fixProtonMail = 'v7';
+  window.__fixProtonMail = 'v8';
 
   const SEL = {
     row: '[data-shortcut-target="item-container"]',
     checkbox: 'input[data-testid="item-checkbox"]',
     star: '[data-testid^="item-star-"]',
     article: 'article[data-shortcut-target="message-container"]',
+    expandHeader: '[data-testid^="message-header-collapsed:"]',   // click to expand
+    collapseHeader: '.message-header-from-container',             // click to collapse
     bodyFrame: 'iframe[data-testid="content-iframe"]',
     reply: '[data-testid="message-view:reply"]',
     replyAll: '[data-testid="message-view:reply-all"]',
@@ -74,7 +81,7 @@
   const READER_NATIVE = new Set(['C', 'E', 'o']);   // act on the open message only
 
   // ---- load indicator: console line + 3s toast --------------------------
-  console.info('[fix-proton-mail] loaded v7');
+  console.info('[fix-proton-mail] loaded v8');
   const toast = (msg, ms = 3000) => {
     const show = () => {
       const t = document.createElement('div');
@@ -88,7 +95,7 @@
     };
     document.body ? show() : addEventListener('DOMContentLoaded', show, { once: true });
   };
-  toast('fix-proton-mail v7 active (? for help)');
+  toast('fix-proton-mail v8 active (? for help)');
 
   // report a missing element; returns true so the caller still consumes the key
   const fail = (name, sel) => {
@@ -110,7 +117,7 @@
   // Show a conversation newest first: reverse its message container. The
   // options page turns this off through an attribute that settings.js sets.
   ring.textContent = `
-    html ${SEL.row}:focus, html ${SEL.navAny}:focus{outline:2px solid #6d4aff!important;outline-offset:-2px!important}
+    html ${SEL.row}:focus, html ${SEL.navAny}:focus, html ${SEL.article}:focus{outline:2px solid #6d4aff!important;outline-offset:-2px!important}
     html:not([data-fix-proton-mail-oldest-first]) div:has(> ${SEL.article}){display:flex;flex-direction:column-reverse}`;
   document.documentElement.appendChild(ring);
 
@@ -179,6 +186,14 @@
     }
     focusRow(list[next]);
     return true;
+  };
+
+  // rows that fit in the list pane, less one so the old cursor stays in view
+  const pageRows = () => {
+    const r = rows()[0];
+    const sc = r && scroller(r);
+    if (!sc) return 10;
+    return Math.max(1, Math.floor(sc.clientHeight / r.getBoundingClientRect().height) - 1);
   };
 
   const jump = (last) => {
@@ -288,13 +303,13 @@
   };
 
   // ---- reader -----------------------------------------------------------
-  // the message the user is on: Proton's focus flag, else the one holding
-  // focus, else the last expanded one, else the last one
+  // the message the user is on: the one holding focus, else Proton's focus
+  // flag (it does not follow focus), else the last expanded one, else the last one
   const currentArticle = () => {
     const arts = [...document.querySelectorAll(SEL.article)];
     const ae = document.activeElement;
-    return arts.find((a) => a.dataset.hasfocus === 'true') ||
-      arts.find((a) => a.contains(ae)) ||
+    return arts.find((a) => a.contains(ae)) ||
+      arts.find((a) => a.dataset.hasfocus === 'true') ||
       arts.filter((a) => a.dataset.expanded === 'true').pop() || arts.pop();
   };
 
@@ -321,50 +336,108 @@
     messageButton(name);
   };
 
-  // the nearest ancestor that scrolls
-  const scroller = (el) => {
-    while (el && !(el.scrollHeight > el.clientHeight && /auto|scroll/.test(getComputedStyle(el).overflowY)))
+  // the nearest ancestor that can scroll; with now, only one that has
+  // content to scroll at the moment
+  const scroller = (el, now = true) => {
+    while (el && !((!now || el.scrollHeight > el.clientHeight) && /auto|scroll/.test(getComputedStyle(el).overflowY)))
       el = el.parentElement;
     return el;
   };
 
-  // Proton swallows arrows in the message view, so scroll the pane ourselves
-  const scrollReader = (dir) => {
-    scroller(currentArticle())?.scrollBy({ top: dir * 80 });   // no scroller = short message
+  // Proton swallows arrows in the message view, so move ourselves.
+  // ↓ / ↑ scroll while the current message runs past the pane edge; at its
+  // edge they move focus to the next / previous message in screen order.
+  const STEP = 80, PEEK = 120;   // px per key; px of a new message to show
+  const articlesOnScreen = () => [...document.querySelectorAll(SEL.article)]
+    .sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+  const stepReader = (dir) => {
+    const art = currentArticle();
+    const sc = scroller(art);
+    if (!art) return true;
+    const pane = sc ? sc.getBoundingClientRect() : { top: 0, bottom: innerHeight };
+    const r = art.getBoundingClientRect();
+    const past = dir > 0 ? r.bottom - pane.bottom : pane.top - r.top;
+    if (sc && past > 1) { sc.scrollBy({ top: dir * Math.min(STEP, past) }); return true; }
+    const arts = articlesOnScreen();
+    const next = arts[arts.indexOf(art) + dir];
+    if (!next) return true;
+    next.focus({ preventScroll: true });
+    const n = next.getBoundingClientRect();
+    const show = Math.min(n.height, PEEK);
+    const need = dir > 0 ? n.top + show - pane.bottom : pane.top - (n.bottom - show);
+    if (sc && need > 0) sc.scrollBy({ top: dir * need });
     return true;
   };
 
-  // When a conversation opens with its top message expanded, Proton still
-  // animates the pane down to that message, which hides the subject. The
-  // animation writes scrollTop each frame, so drop those writes for 1.5 s.
-  // Wheel and j/k still scroll, because they do not write scrollTop. A click
-  // ends the hold, so Proton can scroll to a message the user expands.
-  let clickAt = 0;
-  addEventListener('pointerdown', () => { clickAt = Date.now(); }, true);
+  // Page Up / Page Down: scroll the pane by most of its height, then focus
+  // the message at the top of the pane so ↓ / ↑ go on from there
+  const pageReader = (dir) => {
+    const sc = scroller(currentArticle());
+    if (!sc) return true;
+    sc.scrollBy({ top: dir * sc.clientHeight * 0.9, behavior: 'instant' });
+    const top = sc.getBoundingClientRect().top + 1;
+    const art = articlesOnScreen().find((a) => a.getBoundingClientRect().bottom > top);
+    art?.focus({ preventScroll: true });
+    return true;
+  };
+
+  // Enter / →: expand or collapse the current message
+  const toggleMessage = () => {
+    const art = currentArticle();
+    if (!art) return fail('article', SEL.article);
+    const expanded = art.dataset.expanded === 'true';
+    const sc = scroller(art, false);   // a short thread does not scroll yet
+    // keep the header where it is on screen, but not above the pane top
+    if (sc) holdScroll(sc, art, Math.max(0, art.getBoundingClientRect().top - sc.getBoundingClientRect().top));
+    press(expanded ? 'collapse' : 'expand', expanded ? SEL.collapseHeader : SEL.expandHeader, art);
+    art.focus({ preventScroll: true });
+    return true;
+  };
+
+  // Proton scrolls the pane after it opens a conversation or expands a
+  // message: an animation that writes scrollTop each frame, plus native
+  // scrolls from its focus moves. It measures in DOM order, so in the
+  // reversed order it scrolls to the wrong place. holdScroll keeps el's top
+  // at a fixed offset from the pane top (el null: keep the pane at the top)
+  // for 1.5 s. It drops Proton's writes and undoes other scrolls. A key,
+  // wheel or click ends the hold, so the user can scroll at once.
+  let userAt = 0;
+  for (const ev of ['keydown', 'wheel', 'pointerdown']) addEventListener(ev, () => { userAt = Date.now(); }, true);
   const realScrollTop = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
+  let holdId = 0;
+  const holdScroll = async (sc, el = null, offset = 0) => {
+    const id = ++holdId, start = Date.now(), path = location.pathname;
+    const active = () => id === holdId && Date.now() - start < 1500 &&
+      location.pathname === path && userAt <= start;
+    const get = () => realScrollTop.get.call(sc);
+    const want = () => Math.max(0, el
+      ? get() + el.getBoundingClientRect().top - sc.getBoundingClientRect().top - offset : 0);
+    Object.defineProperty(sc, 'scrollTop', {
+      configurable: true,
+      get,
+      set(v) { if (!active()) realScrollTop.set.call(this, v); },
+    });
+    for (; active(); await sleep(30)) {
+      const w = want();
+      if (Math.abs(get() - w) > 1) realScrollTop.set.call(sc, w);
+    }
+    if (id === holdId) delete sc.scrollTop;
+  };
+
+  // a conversation opened with its top message expanded: show the subject
   const keepTop = async (path) => {
     const start = Date.now();
-    const active = () => Date.now() - start < 1500 && location.pathname === path && clickAt < start;
-    let sc = null;
-    while (active() && !sc) {
+    while (Date.now() - start < 1500 && location.pathname === path) {
       const arts = [...document.querySelectorAll(SEL.article)];
       const open = arts.find((a) => a.dataset.expanded === 'true');
       if (arts.length > 1 && open) {
         const top = arts.reduce((a, b) => (b.getBoundingClientRect().top < a.getBoundingClientRect().top ? b : a));
         if (top !== open) return;   // Proton expanded a lower message: keep its scroll
-        sc = scroller(top);
+        const sc = scroller(top);
+        if (sc) return holdScroll(sc);
       }
-      if (!sc) await sleep(20);
+      await sleep(20);
     }
-    if (!sc) return;
-    Object.defineProperty(sc, 'scrollTop', {
-      configurable: true,
-      get() { return realScrollTop.get.call(this); },
-      set(v) { if (!active()) realScrollTop.set.call(this, v); },
-    });
-    realScrollTop.set.call(sc, 0);
-    while (active()) await sleep(50);
-    delete sc.scrollTop;
   };
   let lastPath = location.pathname;
   setInterval(() => {
@@ -457,12 +530,13 @@
     if (l.length) focusRow(l[0]);
   };
 
-  const HELP = `fix-proton-mail v7
-list:    ↑↓ j k  move   ⌘↑↓  first/last   shift+↑↓ J K  select range
+  const HELP = `fix-proton-mail v8
+list:    ↑↓ j k  move   PgUp/Dn  page   ⌘↑↓  first/last   shift+↑↓ J K  select range
          x space  toggle   Enter →  open   ←  folders   Esc  clear / leave search
          Del/⌫  archive
          r  reply   a R  reply all   F  forward   (checked row, else cursor row)
-reader:  ↑↓ j k  scroll   J K  next/prev   r  reply   a R  reply all
+reader:  ↑↓ j k  scroll, then next/prev message   PgUp/Dn  page   Enter →  expand/collapse
+         J K  next/prev conversation   r  reply   a R  reply all
          F  forward   Esc ←  back to list   Del/⌫  archive   C E o  native
 folders: ↑↓ j k  move   Enter →  open   Esc  back to list
 actions: u  read/unread   *  star   l  label   m  move   i  inbox
@@ -598,8 +672,11 @@ any:     n  new   /  search   U A  unread/all   v  filter   f  hints   ?  help`;
 
     if (reader) {
       switch (k) {
-        case 'ArrowDown': case 'j': return scrollReader(+1);
-        case 'ArrowUp':   case 'k': return scrollReader(-1);
+        case 'ArrowDown': case 'j': return stepReader(+1);
+        case 'ArrowUp':   case 'k': return stepReader(-1);
+        case 'PageDown': return pageReader(+1);
+        case 'PageUp':   return pageReader(-1);
+        case 'Enter': case 'ArrowRight': return toggleMessage();
         case 'J': return openSibling(+1);
         case 'K': return openSibling(-1);
         case 'r': return messageButton('reply');
@@ -614,6 +691,8 @@ any:     n  new   /  search   U A  unread/all   v  filter   f  hints   ?  help`;
       switch (k) {
         case 'ArrowDown': case 'j': return move(+1, e.shiftKey);
         case 'ArrowUp':   case 'k': return move(-1, e.shiftKey);
+        case 'PageDown': return move(+pageRows(), e.shiftKey);
+        case 'PageUp':   return move(-pageRows(), e.shiftKey);
         case 'J': return move(+1, true);
         case 'K': return move(-1, true);
         case 'x': case ' ': return toggleCursor();
@@ -650,6 +729,7 @@ any:     n  new   /  search   U A  unread/all   v  filter   f  hints   ?  help`;
   };
 
   const onKey = (e, ae, reader) => {
+    userAt = Date.now();   // also for keys in the body iframe, which skip window
     if (hint) return handleHintKey(e);
     // while a composer is open, Proton gets every key: focus can be on a
     // composer button or chip, not in a text field

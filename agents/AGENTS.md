@@ -45,7 +45,13 @@ All keys are inactive in text fields and in the composer. The extension must not
 The mode comes from where focus is.
 
 - **List:** focus on a row, or nowhere. The cursor is the focused row. The script adds a focus ring, because Proton's rows have `outline-none--at-all`.
-- **Reader:** focus in an `article` or the body iframe. Arrows scroll the pane, because Proton swallows them.
+- **Reader:** focus in an `article` or the body iframe. Proton swallows arrows, so the script moves itself.
+  - The current message is the focused `article`. Proton's `data-hasfocus` does not follow focus, so it is only a fallback.
+  - Down and Up scroll 80 px while the current message runs past the pane edge. At its edge, they focus the next or previous message in screen order, and show at least 120 px of it.
+  - Page Down and Page Up scroll 90% of the pane, then focus the message at the pane top.
+  - Enter and Right expand a collapsed message (click `message-header-collapsed:<n>`) or collapse an expanded one (click `.message-header-from-container`). The class selector is fragile.
+  - Enter or Right on the row that is already open moves focus into the reader.
+- **List paging:** Page Down and Page Up move the cursor by the rows that fit in the pane, less one. With Shift they select.
 - **Sidebar:** focus on a folder link. Arrows move between links. Left in the list goes here, and Right or Enter opens the folder.
   - The links are `a[data-testid^="navigation-link:"]`. This includes custom folders, labels and views. The script skips links to other hosts, for example the folders and labels settings page.
   - The current folder is the link whose path starts the URL. Views have two path segments (`views/newsletters`).
@@ -73,7 +79,10 @@ The mode comes from where focus is.
 - An open conversation shows the newest message first. A CSS rule sets `flex-direction: column-reverse` on the div that holds the `article` elements.
 - The options page (`options.html`) has one checkbox for this. It saves `newestFirst` in `chrome.storage.sync`.
 - `fix-proton-mail.js` runs in the main world and cannot read `chrome.storage`. `settings.js` runs in the isolated world, reads the option, and sets `data-fix-proton-mail-oldest-first` on `<html>`. The CSS rule does not apply when that attribute is present.
-- When a conversation opens and its top message is expanded, Proton still animates the pane down to that message, which hides the subject. The animation writes `scrollTop` each frame, so the script drops those writes on that scroller for 1.5 s. Wheel and `j`/`k` still scroll, because they do not write `scrollTop`. A click ends the hold.
+- Proton scrolls the pane after it opens a conversation or expands a message. It uses an animation that writes `scrollTop` each frame, plus native scrolls from its focus moves. It measures in DOM order, so in the reversed order it scrolls to the wrong place.
+- `holdScroll` fixes this for 1.5 s. It drops Proton's `scrollTop` writes, and it undoes other scrolls. On a conversation open with the top message expanded, it keeps the pane at the top. On expand or collapse, it keeps the message header where it was on the screen.
+- A key, wheel or click ends the hold. Keys in the body iframe end it too.
+- A short thread does not scroll yet, so the hold finds the pane by its overflow style, not by its content height.
 - Only the visual order changes. The DOM order, Tab order and Proton's choice of which message to expand do not change.
 
 ### Proton DOM
@@ -124,7 +133,7 @@ Use Chrome Canary. It has a separate profile, so a test does not touch your norm
    ```
    "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary" \
      --remote-debugging-port=9333 \
-     --user-data-dir=/tmp/fix-proton-mail-profile \
+     --user-data-dir="$PWD/tmp/canary-profile" \
      --no-first-run --no-default-browser-check \
      --disable-features=DisableLoadExtensionCommandLineSwitch \
      --load-extension="$PWD/extension" \
@@ -137,7 +146,7 @@ Use Chrome Canary. It has a separate profile, so a test does not touch your norm
 
 Chrome Canary 2026-10 ignored `--load-extension`, also with the `--disable-features` flag. If the script did not load, inject it: `node agents/cdp.mjs evalfile extension/fix-proton-mail.js`. The script does not depend on load timing, so the result is the same.
 
-After you change the script, reload the tab and load the script again. When you finish, quit Canary and delete the profile folder. A running debug instance can stop your normal browser from starting.
+After you change the script, reload the tab and load the script again. When you finish, quit Canary. Keep `tmp/canary-profile`, so the next session stays logged in. `.gitignore` excludes `tmp/`. A running debug instance can stop your normal browser from starting.
 
 ## Driving the browser: cdp.mjs
 
