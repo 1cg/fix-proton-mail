@@ -1,0 +1,38 @@
+# Builds the extension zip and publishes a GitHub release.
+# Run it from the Actions tab (tag v<manifest version>), or push a tag v<version>.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build zip
+        run: |
+          version=$(jq -r .version extension/manifest.json)
+          tag="v$version"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "$tag" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match manifest version $version. Set the manifest version or the tag."
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          (cd extension && zip -r "../fix-proton-mail-$version.zip" . -x '.*')
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" "fix-proton-mail-$VERSION.zip" \
+            --title "fix-proton-mail $VERSION" \
+            --target "$GITHUB_SHA" \
+            --notes "Install: unzip the file, open chrome://extensions, turn on Developer mode, click Load unpacked, and select the unzipped folder."
