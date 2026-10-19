@@ -1,4 +1,4 @@
-// Proton Mail keyboard enhancements v4 (Chrome/Brave extension, or Brave custom scriptlet)
+// Proton Mail keyboard enhancements v5 (Chrome/Brave extension, or Brave custom scriptlet)
 //
 // Replaces Proton's single-key shortcuts. Every unmodified letter (and *) is
 // consumed outside text fields, so Proton's own shortcuts never act on its
@@ -11,16 +11,20 @@
 //   ↓ ↑ j k               move cursor            cmd+↓ / cmd+↑   last / first row
 //   shift+↓ ↑  J K        range-select from the anchor row
 //   x  space              toggle the cursor row's checkbox
-//   Enter                 open cursor row        Esc   clear selection, then leave search
+//   Enter  →              open cursor row        Esc   clear selection, then leave search
+//   ←                     go to the folder sidebar
 //   Del / ⌫               archive
 //   r / a R / F           reply / reply all / forward the one selected conversation
 //                         (the one checked row, else the cursor row, else the open one)
 // Reader (focus in an open message or its body iframe):
 //   ↓ ↑ j k               scroll                 J / K   open next / previous conversation
 //   r                     reply                  a  R    reply all
-//   F                     forward                Esc     back to the list
+//   F                     forward                Esc ←   back to the list
 //   Del / ⌫               archive the open conversation
 //   C  E  o               Proton native: remote content, embedded images, original
+// Folder sidebar (focus on a folder link):
+//   ↓ ↑ j k               move between folders   Enter →  open the folder, focus its list
+//   Esc                   back to the list
 // Actions (checked rows, else the open conversation (reader) or cursor row (list)):
 //   u    toggle read / unread     *  star        l  label as      m  move to
 //   i    move to Inbox            s  spam        t  trash
@@ -39,7 +43,7 @@
 //   - folder routes are /u/<n>/<slug>, and the router follows history.pushState + popstate
 (() => {
   if (window.top !== window || window.__protonKbd) return;
-  window.__protonKbd = 'v4';
+  window.__protonKbd = 'v5';
 
   const SEL = {
     row: '[data-shortcut-target="item-container"]',
@@ -59,13 +63,14 @@
     // unread, read, labelas, moveto
     toolbar: (name) => `[data-testid="toolbar:${name}"]`,
     navLink: (slug) => `a[data-testid="navigation-link:${slug}"]`,
+    navAny: 'a[data-testid^="navigation-link:"]',
   };
   const FOLDERS = { i: 'inbox', a: 'archive', e: 'sent', '*': 'starred', d: 'drafts',
     t: 'trash', s: 'spam', m: 'all-mail' };
   const READER_NATIVE = new Set(['C', 'E', 'o']);   // act on the open message only
 
   // ---- load indicator: console line + 3s toast --------------------------
-  console.info('[proton-kbd] loaded v4');
+  console.info('[proton-kbd] loaded v5');
   const toast = (msg, ms = 3000) => {
     const show = () => {
       const t = document.createElement('div');
@@ -79,7 +84,7 @@
     };
     document.body ? show() : addEventListener('DOMContentLoaded', show, { once: true });
   };
-  toast('proton-kbd v4 active (? for help)');
+  toast('proton-kbd v5 active (? for help)');
 
   // report a missing element; returns true so the caller still consumes the key
   const fail = (name, sel) => {
@@ -99,7 +104,7 @@
   const ring = document.createElement('style');
   // rows carry .outline-none--at-all, so out-specify it for the cursor row
   ring.textContent = `
-    html ${SEL.row}:focus{outline:2px solid #6d4aff!important;outline-offset:-2px!important}`;
+    html ${SEL.row}:focus, html ${SEL.navAny}:focus{outline:2px solid #6d4aff!important;outline-offset:-2px!important}`;
   document.documentElement.appendChild(ring);
 
   // ---- generic helpers --------------------------------------------------
@@ -361,12 +366,50 @@
   };
   let gAt = 0;   // time of a pending "g" prefix
 
-  const HELP = `proton-kbd v4
+  // ---- folder sidebar ---------------------------------------------------
+  // skip links to other hosts (the folders and labels settings page)
+  const navLinks = () => [...document.querySelectorAll(SEL.navAny)]
+    .filter((a) => a.host === location.host && shown(a));
+  // the link is the current folder; paths can have two segments (views/newsletters)
+  const isCurrent = (a) => location.pathname === a.pathname || location.pathname.startsWith(a.pathname + '/');
+
+  const focusSidebar = () => {
+    const links = navLinks();
+    if (!links.length) return fail('folder links', SEL.navAny);
+    (links.find(isCurrent) || links[0]).focus();
+    return true;
+  };
+
+  const moveSidebar = (ae, dir) => {
+    const links = navLinks();
+    const i = links.indexOf(ae.closest(SEL.navAny));
+    links[Math.min(links.length - 1, Math.max(0, i + dir))]?.focus();
+    return true;
+  };
+
+  // open the focused folder, then put the cursor on its first row
+  const openSidebar = async (ae) => {
+    const link = ae.closest(SEL.navAny);
+    const first = rows()[0]?.dataset.elementId;   // Proton can reuse the row elements
+    resetSelectionState();
+    cursor = null;
+    if (!isCurrent(link)) {
+      link.click();
+      await waitFor(() => isCurrent(link) && rows()[0] && rows()[0].dataset.elementId !== first);
+      await sleep(300);   // Proton puts focus back on the link after it renders
+    }
+    const l = rows();
+    if (l.length) focusRow(l[0]);
+  };
+
+  const HELP = `proton-kbd v5
 list:    ↑↓ j k  move   ⌘↑↓  first/last   shift+↑↓ J K  select range
-         x space  toggle   Enter  open   Esc  clear / leave search   Del/⌫  archive
+         x space  toggle   Enter →  open   ←  folders   Esc  clear / leave search
+         Del/⌫  archive
          r  reply   a R  reply all   F  forward   (checked row, else cursor row)
 reader:  ↑↓ j k  scroll   J K  next/prev   r  reply   a R  reply all
-         F  forward   Esc  back to list   Del/⌫  archive   C E o  native
+         F  forward   Esc ←  back to list   Del/⌫  archive   C E o  native
+folders: ↑↓ j k  move   Enter →  open   Esc  back to list
 actions: u  read/unread   *  star   l  label   m  move   i  inbox
          s  spam   t  trash
 go:      g + i a e * d t s m   (inbox archive sent starred drafts trash spam all)
@@ -489,6 +532,15 @@ any:     n  new   /  search   U A  unread/all   v  filter   f  hints   ?  help`;
     }
     gAt = 0;
 
+    if (ae?.closest?.(SEL.navAny)) {
+      switch (k) {
+        case 'ArrowDown': case 'j': return moveSidebar(ae, +1);
+        case 'ArrowUp':   case 'k': return moveSidebar(ae, -1);
+        case 'ArrowRight': case 'Enter': openSidebar(ae); return true;
+        case 'Escape': return backToList();
+      }
+    }
+
     if (reader) {
       switch (k) {
         case 'ArrowDown': case 'j': return scrollReader(+1);
@@ -498,7 +550,7 @@ any:     n  new   /  search   U A  unread/all   v  filter   f  hints   ?  help`;
         case 'r': return messageButton('reply');
         case 'a': case 'R': return messageButton('replyAll');
         case 'F': return messageButton('forward');
-        case 'Escape': return backToList();
+        case 'Escape': case 'ArrowLeft': return backToList();
         case 'Delete': case 'Backspace':
           toolbarAction(['movetoarchive'], true, { moves: true }); return true;
       }
@@ -511,7 +563,8 @@ any:     n  new   /  search   U A  unread/all   v  filter   f  hints   ?  help`;
         case 'K': return move(-1, true);
         case 'x': case ' ': return toggleCursor();
         case 'Escape': return listEscape();
-        case 'Enter': return openCursor();
+        case 'Enter': case 'ArrowRight': return openCursor();
+        case 'ArrowLeft': return focusSidebar();
         case 'F': listMessage('forward'); return true;
         case 'r': listMessage('reply'); return true;
         case 'a': case 'R': listMessage('replyAll'); return true;

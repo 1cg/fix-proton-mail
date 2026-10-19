@@ -2,3 +2,4 @@ tmp/
 *.zip
 CLAUDE.md
 .DS_Store
+.idea/
