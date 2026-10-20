@@ -65,7 +65,7 @@ The mode comes from where focus is.
 - Proton is a React app. `checkbox.click()` reaches React state. Do not set `checkbox.checked`.
 - Toolbar buttons act on the checked rows. If no rows are checked, they act on the open conversation.
 - If no rows are checked, a list action checks the cursor row, clicks the toolbar button, then unchecks the row.
-- After an action that moves rows (archive, inbox, spam, trash), the cursor goes to the row at the first moved row's index.
+- After an action that moves rows (archive, inbox, spam, trash), the cursor goes to the first row below the last moved row. If no row is below, it goes to the first moved row's index. The script matches rows by id, because Proton can reuse row elements.
 - Delete and Backspace archive. They never trash.
 - In the list, `r`, `a`/`R` and `F` act on one conversation: the one checked row, else the cursor row, else the open one. If that conversation is not open, the script opens it first. Proton then marks it as read.
 

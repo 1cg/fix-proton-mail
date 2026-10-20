@@ -1,4 +1,4 @@
-// fix-proton-mail v8.2: Proton Mail keyboard enhancements (Chrome MV3 extension, main-world content script)
+// fix-proton-mail v8.3: Proton Mail keyboard enhancements (Chrome MV3 extension, main-world content script)
 //
 // Replaces Proton's single-key shortcuts. Every unmodified letter (and *) is
 // consumed outside text fields, so Proton's own shortcuts never act on its
@@ -51,7 +51,7 @@
 //   - folder routes are /u/<n>/<slug>, and the router follows history.pushState + popstate
 (() => {
   if (window.top !== window || window.__fixProtonMail) return;
-  window.__fixProtonMail = 'v8.2';
+  window.__fixProtonMail = 'v8.3';
 
   const SEL = {
     row: '[data-shortcut-target="item-container"]',
@@ -81,7 +81,7 @@
   const READER_NATIVE = new Set(['C', 'E', 'o']);   // act on the open message only
 
   // ---- load indicator: console line + 3s toast --------------------------
-  console.info('[fix-proton-mail] loaded v8.2');
+  console.info('[fix-proton-mail] loaded v8.3');
   const toast = (msg, ms = 3000) => {
     const show = () => {
       const t = document.createElement('div');
@@ -95,7 +95,7 @@
     };
     document.body ? show() : addEventListener('DOMContentLoaded', show, { once: true });
   };
-  toast('fix-proton-mail v8.2 active (? for help)');
+  toast('fix-proton-mail v8.3 active (? for help)');
 
   // report a missing element; returns true so the caller still consumes the key
   const fail = (name, sel) => {
@@ -271,7 +271,7 @@
   };
 
   // names: toolbar buttons to try in order (read/unread swap with state)
-  // moves: the rows leave the list, so put the cursor where the first one was
+  // moves: the rows leave the list, so put the cursor on the row below them
   const toolbarAction = async (names, fromReader, { moves = false, keepChecked = false } = {}) => {
     const t = targets(fromReader);
     if (!t) return toast('fix-proton-mail: no row to act on');
@@ -282,10 +282,16 @@
     b.click();
     resetSelectionState();
     if (moves) {
-      const idx = Math.min(...t.rows.map((r) => t.list.indexOf(r)));
-      await waitFor(() => t.rows.every((r) => !r.isConnected || !shown(r)));
+      // the cursor goes to the first row below the last moved row, else to
+      // the first moved row's index. Match by id: Proton can reuse row elements.
+      const moved = new Set(t.rows.map((r) => r.dataset.elementId));
+      const last = Math.max(...t.rows.map((r) => t.list.indexOf(r)));
+      const nextId = t.list.slice(last + 1).find((r) => !moved.has(r.dataset.elementId))?.dataset.elementId;
+      await waitFor(() => !rows().some((r) => moved.has(r.dataset.elementId)));
       const l = rows();
-      if (l.length) focusRow(l[Math.min(idx, l.length - 1)]);
+      const first = Math.min(...t.rows.map((r) => t.list.indexOf(r)));
+      const next = l.find((r) => r.dataset.elementId === nextId) || l[Math.min(first, l.length - 1)];
+      if (next) focusRow(next);
     } else if (t.auto && !keepChecked) {
       await sleep(300);
       setChecked(t.rows[0], false);
@@ -531,7 +537,7 @@
     if (l.length) focusRow(l[0]);
   };
 
-  const HELP = `fix-proton-mail v8.2
+  const HELP = `fix-proton-mail v8.3
 list:    ↑↓ j k  move   PgUp/Dn  page   ⌘↑↓  first/last   shift+↑↓ J K  select range
          x space  toggle   Enter →  open   ←  folders   Esc  clear / leave search
          Del/⌫  archive

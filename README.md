@@ -10,7 +10,7 @@ This repository is a public resource. Issues and pull requests are off.
 2. Open `chrome://extensions` (Brave: `brave://extensions`).
 3. Turn on **Developer mode**.
 4. Click **Load unpacked** and select the `extension` folder.
-5. Reload Proton Mail. A "fix-proton-mail v8.2 active" toast shows.
+5. Reload Proton Mail. A "fix-proton-mail v8.3 active" toast shows.
 
 ## Keys
 
